@@ -23,16 +23,17 @@
 
 import torch
 
-C0 = 0.28209479177387814
-C1 = 0.4886025119029199
-C2 = [
+# Hardcoded values of unique SH coeffs for order l
+C0 = 0.28209479177387814  # Order l=0
+C1 = 0.4886025119029199   # Order l=1 (same for all 3 monomials)
+C2 = [                    # Order l=2
     1.0925484305920792,
     -1.0925484305920792,
     0.31539156525252005,
     -1.0925484305920792,
     0.5462742152960396
 ]
-C3 = [
+C3 = [                    # Order l=3
     -0.5900435899266435,
     2.890611442640554,
     -0.4570457994644658,
@@ -41,7 +42,7 @@ C3 = [
     1.445305721320277,
     -0.5900435899266435
 ]
-C4 = [
+C4 = [                    # Order l=4
     2.5033429417967046,
     -1.7701307697799304,
     0.9461746957575601,
@@ -71,9 +72,11 @@ def eval_sh(deg, sh, dirs):
     coeff = (deg + 1) ** 2
     assert sh.shape[-1] >= coeff
 
+    # Ellipses omit dimensions
+    # Analytically derived basis functions with hardcoded coeffs for given order, called `deg` here (see https://patapom.com/blog/SHPortal/#analytical-expressions-for-the-first-sh-coefficients)
     result = C0 * sh[..., 0]
     if deg > 0:
-        x, y, z = dirs[..., 0:1], dirs[..., 1:2], dirs[..., 2:3]
+        x, y, z = dirs[..., 0:1], dirs[..., 1:2], dirs[..., 2:3]  # Unit vector viewing direction (cartesian coords equiv to spherical angles (\theta,\phi))
         result = (result -
                 C1 * y * sh[..., 1] +
                 C1 * z * sh[..., 2] -
@@ -112,7 +115,21 @@ def eval_sh(deg, sh, dirs):
     return result
 
 def RGB2SH(rgb):
+    """Apply per-channel normalization and band-limited RGB->SH conversion.
+    
+    Centers RGB values around 0 and rescales by SH basis constant 0.5*sqrt(1/pi).
+    
+    Effectively converts RGB mean radiance (per direction) into an SH coeff assuming only 0th order term.
+
+    Results in one SH coeff per channel per point.
+
+    """
     return (rgb - 0.5) / C0
 
 def SH2RGB(sh):
+    """Reconstruct approximate RGB colors from SH coeffs.
+    
+    Undoes RGB2SH operations.
+    
+    """
     return sh * C0 + 0.5

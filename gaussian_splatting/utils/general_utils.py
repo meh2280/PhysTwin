@@ -62,6 +62,14 @@ def get_expon_lr_func(
     return helper
 
 def strip_lowerdiag(L):
+    """Reparameterize \Sigma anisotropic variance to strip redundant elements for efficiency.
+    
+    Since \Sigma is 3x3 symmetric positive-definite, only need to store upper triangle.
+    I.e. elements \sigma_{xx}, \sigma_{yy}, \sigma_{zz}; \sigma_{xy}, \sigma_{yz}; \sigma_{xz}
+
+    This helps with storage and rendering+projection efficiency, as well as learning stability.
+    
+    """
     uncertainty = torch.zeros((L.shape[0], 6), dtype=torch.float, device="cuda")
 
     uncertainty[:, 0] = L[:, 0, 0]
@@ -78,10 +86,11 @@ def strip_symmetric(sym):
 def build_rotation(r):
     norm = torch.sqrt(r[:,0]*r[:,0] + r[:,1]*r[:,1] + r[:,2]*r[:,2] + r[:,3]*r[:,3])
 
-    q = r / norm[:, None]
+    q = r / norm[:, None]  # "normalize q to obtain a valid unit quaternion" (p.4)
 
     R = torch.zeros((q.size(0), 3, 3), device='cuda')
 
+    # See https://docs.gsplat.studio/main/conventions/data_conventions.html (w is called r here)
     r = q[:, 0]
     x = q[:, 1]
     y = q[:, 2]

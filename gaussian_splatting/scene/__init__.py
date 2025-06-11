@@ -23,7 +23,7 @@ import torch
 
 class Scene:
 
-    gaussians : GaussianModel
+    gaussians : GaussianModel  # PEP 526 class-level variable annotation (type annotation) for static type checkers e.g. mypy, VSCode, PyCharm, etc.
 
     def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0]):
         """b
@@ -48,7 +48,7 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.depths, args.eval)
-        elif os.path.exists(os.path.join(args.source_path, 'camera_meta.pkl')):
+        elif os.path.exists(os.path.join(args.source_path, 'camera_meta.pkl')):  # Hit (custom added condition for data/gaussian_data/<case-name>/camera_meta.pkl)
             print("Found metadata.json file, assuming customized QQTT dataset!")
             scene_info = sceneLoadTypeCallbacks["QQTT"](args.source_path, args.images, args.depths, args.eval, args.train_test_exp, args.use_masks, args.gs_init_opt, args.pts_per_triangles, args.use_high_res)
         else:
@@ -68,11 +68,11 @@ class Scene:
             with open(os.path.join(self.model_path, "cameras.json"), 'w') as file:
                 json.dump(json_cams, file)
 
-        if shuffle:
+        if shuffle:  # Reduce sampling bias, improve generalization, etc.
             random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
             random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
 
-        self.cameras_extent = scene_info.nerf_normalization["radius"]
+        self.cameras_extent = scene_info.nerf_normalization["radius"]  # Camera "windows"?
 
         for resolution_scale in resolution_scales:
             print("Loading Training Cameras")
@@ -80,8 +80,9 @@ class Scene:
             print("Loading Test Cameras")
             self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args, scene_info.is_nerf_synthetic, True)
 
-        self.gaussians.isotropic = args.isotropic
+        self.gaussians.isotropic = args.isotropic  # True for PhysTwin
 
+        # Init/load Gaussians from "free" point cloud
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",

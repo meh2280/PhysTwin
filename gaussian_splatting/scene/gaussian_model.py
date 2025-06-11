@@ -31,27 +31,28 @@ class GaussianModel:
 
     def setup_functions(self):
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
-            L = build_scaling_rotation(scaling_modifier * scaling, rotation)
-            actual_covariance = L @ L.transpose(1, 2)
-            symm = strip_symmetric(actual_covariance)
+            """Build optimizable anisotropic covar mat \Sigma = RSS^TR^T (p.4, Eq. 6)."""
+            L = build_scaling_rotation(scaling_modifier * scaling, rotation)  # RS
+            actual_covariance = L @ L.transpose(1, 2)                         # RSS^TR^T
+            symm = strip_symmetric(actual_covariance)                         # Reparametrization for efficiency and training stability
             return symm
         
-        self.scaling_activation = torch.exp
-        self.scaling_inverse_activation = torch.log
+        self.scaling_activation = torch.exp                       # "[we] use an exponential activation function for the scale of the covariance..." (p.7)
+        self.scaling_inverse_activation = torch.log               # For initialization (during densify_and_split "model surgery")
 
         self.covariance_activation = build_covariance_from_scaling_rotation
 
-        self.opacity_activation = torch.sigmoid
-        self.inverse_opacity_activation = inverse_sigmoid
+        self.opacity_activation = torch.sigmoid                   # "We use a sigmoid activation function for \alpha..." (p.7)
+        self.inverse_opacity_activation = inverse_sigmoid         # For initialization (during densify_and_split "model surgery")
 
-        self.rotation_activation = torch.nn.functional.normalize
+        self.rotation_activation = torch.nn.functional.normalize  # Justification for choice? Optimizing training?
 
-        self.isotropic = False
+        self.isotropic = False                                    # What happens if you set to True?
 
     def __init__(self, sh_degree, optimizer_type="default"):
         self.active_sh_degree = 0
         self.optimizer_type = optimizer_type
-        self.max_sh_degree = sh_degree  
+        self.max_sh_degree = sh_degree  # E.g. sh_degree=3 => (3+1)^2=16 coeffs max. (see https://www.reddit.com/r/computervision/comments/1bkvqf7/anyone_seen_a_good_article_on_spherical/ and init of `features` in create_from_pcd())
         self._xyz = torch.empty(0)
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
@@ -161,12 +162,13 @@ class GaussianModel:
             self.active_sh_degree += 1
 
     def create_from_pcd(self, pcd : BasicPointCloud, cam_infos : int, spatial_lr_scale : float):
-        self.spatial_lr_scale = spatial_lr_scale
-        fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
-        fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())
-        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()
-        features[:, :3, 0 ] = fused_color
-        features[:, 3:, 1:] = 0.0
+        """Initialize Gaussians from point cloud."""
+        self.spatial_lr_scale = spatial_lr_scale                                                         # Justification for adding learning rate for position feature?
+        fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()                          # Nx3
+        fused_color = RGB2SH(torch.tensor(np.asarray(pcd.colors)).float().cuda())                        # Convert all points' colors (for all channels i.e. Nx3 float in [0,1]) into SH coeffs
+        features = torch.zeros((fused_color.shape[0], 3, (self.max_sh_degree + 1) ** 2)).float().cuda()  # N x 3 x (l+1)^2
+        features[:, :3, 0 ] = fused_color                                                                # Init DC term
+        features[:, 3:, 1:] = 0.0                                                                        # Zero AC terms i.e. init color as isotropic (not to be confused with isotropic covariance / spatial spread)
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
@@ -180,22 +182,23 @@ class GaussianModel:
 
         opacities = self.inverse_opacity_activation(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
-        self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
-        self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
-        self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
-        self._scaling = nn.Parameter(scales.requires_grad_(True))
-        self._rotation = nn.Parameter(rots.requires_grad_(True))
-        self._opacity = nn.Parameter(opacities.requires_grad_(True))
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-        self.exposure_mapping = {cam_info.image_name: idx for idx, cam_info in enumerate(cam_infos)}
+        # See p.4
+        self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))                                        # Optimization parameter positions
+        self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))   # Partial optimization parameter for color c; DC for "direct current" i.e. only 0th order term (RGB color uniform across all dirs w/o angular variation); 1 SH coeff per color channel per point
+        self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))  # Partial optimization parameter for color c; "AC" i.e. 1st order+ terms
+        self._scaling = nn.Parameter(scales.requires_grad_(True))                                               # Partial optimization parameter for covar \Sigma
+        self._rotation = nn.Parameter(rots.requires_grad_(True))                                                # Partial optimization parameter for covar \Sigma
+        self._opacity = nn.Parameter(opacities.requires_grad_(True))                                            # Optimization parameter alpha
+        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")                                  # Criterion for pruning + densification step ("we periodically remove Gaussians that are very large in worldspace", p.6)
+        self.exposure_mapping = {cam_info.image_name: idx for idx, cam_info in enumerate(cam_infos)}            # Component of space depth + tile ID key for sorting step?
         self.pretrained_exposures = None
         exposure = torch.eye(3, 4, device="cuda")[None].repeat(len(cam_infos), 1, 1)
-        self._exposure = nn.Parameter(exposure.requires_grad_(True))
+        self._exposure = nn.Parameter(exposure.requires_grad_(True))                                            # Partial optimization parameter for color c (per-camera color tone/exposure adjustment to match lighting inconsistencies across photos)
 
     def training_setup(self, training_args):
-        self.percent_dense = training_args.percent_dense
-        self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.percent_dense = training_args.percent_dense                                  # Course-to-fine training trick
+        self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")  # Criterion for type of densification treatment (and analysis?)
+        self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")               # Normalization of accumulated gradients
 
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
@@ -217,6 +220,7 @@ class GaussianModel:
 
         self.exposure_optimizer = torch.optim.Adam([self._exposure])
 
+        # Definitions of learning rate exponential warmup + decay shape ("we use a standard exponential decay scheduling technique similar to Plenoxels, but for positions only", p.5)
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,

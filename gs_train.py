@@ -47,9 +47,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)
-    scene = Scene(dataset, gaussians)
-    gaussians.training_setup(opt)
+    gaussians = GaussianModel(dataset.sh_degree, opt.optimizer_type)  # Create Gaussians
+    scene = Scene(dataset, gaussians)                                 # Init/load Gaussians from point cloud
+    gaussians.training_setup(opt)                                     # Set up learning params, learning rate curves, densification strategy related variables, optimizer
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
