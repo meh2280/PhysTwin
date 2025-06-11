@@ -3,7 +3,8 @@ import os
 import json
 
 base_path = "./data/different_types"
-dir_names = glob.glob(f"{base_path}/*")
+#dir_names = glob.glob(f"{base_path}/*")
+dir_names=[f'{base_path}/double_stretch_sloth']
 for dir_name in dir_names:
     case_name = dir_name.split("/")[-1]
 

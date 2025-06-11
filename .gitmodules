@@ -1,0 +1,6 @@
+[submodule "Grounded-SAM-2"]
+	path = Grounded-SAM-2
+	url = https://github.com/IDEA-Research/Grounded-SAM-2
+[submodule "pytorch3d"]
+	path = pytorch3d
+	url = https://github.com/facebookresearch/pytorch3d

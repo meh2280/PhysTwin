@@ -16,7 +16,8 @@ height, width = 480, 848
 FPS = 30
 alpha = 0.7
 
-dir_names = glob.glob(f"{base_path}/*")
+#dir_names = glob.glob(f"{base_path}/*")
+dir_names=[f'{base_path}/double_stretch_sloth']
 for dir_name in dir_names:
     case_name = dir_name.split("/")[-1]
     print(f"Processing {case_name}!!!!!!!!!!!!!!!")
